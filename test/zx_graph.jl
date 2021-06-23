@@ -22,9 +22,12 @@ zxd = ZXDiagram(2)
 push_gate!(zxd, Val(:H), 1)
 push_gate!(zxd, Val(:CNOT), 2, 1)
 zxg = ZXGraph(zxd)
-@test all([(nothing ∉ s) for s in ZXCalculus.spider_sequence(zxg)])
 
 zxg3 = ZXGraph(ZXDiagram(3))
 ZXCalculus.add_global_phase!(zxg3, ZXCalculus.Phase(1//4))
 ZXCalculus.add_power!(zxg3, 3)
 @test ZXCalculus.scalar(zxg3) == Scalar(3, 1//4)
+@test degree(zxg3, 1) == indegree(zxg3, 1) == outdegree(zxg3, 1)
+@test ZXCalculus.qubit_loc(zxg3, 1) == ZXCalculus.qubit_loc(zxg3, 2)
+@test ZXCalculus.column_loc(zxg3, 1) == 1//1
+@test ZXCalculus.column_loc(zxg3, 2) == 3//1

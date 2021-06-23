@@ -16,8 +16,8 @@ struct ZXDiagram{T<:Integer, P} <: AbstractZXDiagram{T, P}
     phase_ids::Dict{T, Tuple{T, Int}}
 
     scalar::Scalar{P}
-    _inputs::Vector{T}
-    _outputs::Vector{T}
+    inputs::Vector{T}
+    outputs::Vector{T}
 
     function ZXDiagram{T, P}(mg::Multigraph{T}, st::Dict{T, SpiderType.SType}, ps::Dict{T, P},
         layout::ZXLayout{T}, phase_ids::Dict{T, Tuple{T, Int}} = Dict{T, Tuple{T, Int}}(),
@@ -114,22 +114,22 @@ function ZXDiagram(nbits::T) where {T<:Integer}
     mg = Multigraph(2*nbits)
     st = [SpiderType.In for _ = 1:2*nbits]
     ps = [Phase(0//1) for _ = 1:2*nbits]
-    spider_q = Dict{T, Int}()
+    spider_q = Dict{T, Rational{Int}}()
     spider_col = Dict{T, Rational{Int}}()
     for i = 1:nbits
         add_edge!(mg, 2*i-1, 2*i)
         @inbounds st[2*i] = SpiderType.Out
         spider_q[2*i-1] = i
-        spider_col[2*i-1] = 1
+        spider_col[2*i-1] = 2
         spider_q[2*i] = i
-        spider_col[2*i] = -1
+        spider_col[2*i] = 1
     end
     layout = ZXLayout(nbits, spider_q, spider_col)
     return ZXDiagram(mg, st, ps, layout)
 end
 
 Base.copy(zxd::ZXDiagram{T, P}) where {T, P} = ZXDiagram{T, P}(copy(zxd.mg), copy(zxd.st), copy(zxd.ps), copy(zxd.layout),
-    deepcopy(zxd.phase_ids), copy(zxd.scalar), copy(zxd._inputs), copy(zxd._outputs))
+    deepcopy(zxd.phase_ids), copy(zxd.scalar), copy(zxd.inputs), copy(zxd.outputs))
 
 """
     spider_type(zxd, v)
@@ -296,20 +296,9 @@ function insert_spider!(zxd::ZXDiagram{T, P}, v1::T, v2::T, st::SpiderType.SType
     mt = mul(zxd.mg, v1, v2)
     vs = Vector{T}(undef, mt)
     for i = 1:mt
-        l1 = qubit_loc(zxd, v1)
-        l2 = qubit_loc(zxd, v2)
-        t1 = column_loc(zxd, v1)
-        t2 = column_loc(zxd, v2)
         v = add_spider!(zxd, st, phase, [v1, v2])
         @inbounds vs[i] = v
         rem_edge!(zxd, v1, v2)
-        if l1 == l2 && l1 !== nothing
-            t = min(floor(t1), floor(t2)) + 1
-            if t >= max(t1, t2)
-                t = (t1 + t2) / 2
-            end
-            set_loc!(zxd.layout, v, l1, t)
-        end
     end
     return vs
 end
@@ -334,18 +323,6 @@ spiders(zxd::ZXDiagram) = vertices(zxd.mg)
 qubit_loc(zxd::ZXDiagram{T, P}, v::T) where {T, P} = qubit_loc(zxd.layout, v)
 function column_loc(zxd::ZXDiagram{T, P}, v::T) where {T, P}
     c_loc = column_loc(zxd.layout, v)
-    if c_loc !== nothing
-        if spider_type(zxd, v) == SpiderType.Out
-            nb = neighbors(zxd, v)[1]
-            spider_type(zxd, nb) == SpiderType.In && return 3//1
-            c_loc = floor(column_loc(zxd, nb) + 2)
-        end
-        if spider_type(zxd, v) == SpiderType.In
-            nb = neighbors(zxd, v)[1]
-            spider_type(zxd, nb) == SpiderType.Out && return 1//1
-            c_loc = ceil(column_loc(zxd, nb) - 2)
-        end
-    end
     return c_loc
 end
 
@@ -486,14 +463,14 @@ tcount(cir::AbstractZXDiagram) = sum([phase(cir, v) % 1//2 != 0 for v in spiders
 
 Returns a vector of input ids.
 """
-get_inputs(zxd::ZXDiagram) = zxd._inputs
+get_inputs(zxd::ZXDiagram) = zxd.inputs
 
 """
     get_outputs(zxd)
 
 Returns a vector of output ids.
 """
-get_outputs(zxd::ZXDiagram) = zxd._outputs
+get_outputs(zxd::ZXDiagram) = zxd.outputs
 
 """
     scalar(zxd)
@@ -513,16 +490,110 @@ function add_power!(zxd::ZXDiagram, n)
 end
 
 function spider_sequence(zxd::ZXDiagram{T, P}) where {T, P}
-    nbits = nqubits(zxd)
-    if nbits > 0
-        vs = spiders(zxd)
-        spider_seq = Vector{Vector{T}}(undef, nbits)
-        for q = 1:nbits
-            spider_seq[q] = vs[[ZXCalculus.qubit_loc(zxd, v) == q for v in vs]]
-            sort!(spider_seq[q], by = (v -> column_loc(zxd, v)))
-        end
-        return spider_seq
+    seq = []
+    generate_layout!(zxd, seq)
+    return seq
+end
+
+function generate_layout!(zxd::ZXDiagram{T, P}, seq::Vector{Any} = []) where {T, P}
+    layout = zxd.layout
+    nbits = length(zxd.inputs)
+    vs_frontier = copy(zxd.inputs)
+    vs_generated = Set(vs_frontier)
+    frontier_col = [1//1 for _ = 1:nbits]
+    frontier_active = [true for _ = 1:nbits]
+    for i = 1:nbits
+        set_qubit!(layout, vs_frontier[i], i)
+        set_column!(layout, vs_frontier[i], 1//1)
     end
+
+    while !(zxd.outputs ⊆ vs_frontier)
+        while any(frontier_active)
+            for q in 1:nbits
+                if frontier_active[q]
+                    v = vs_frontier[q]
+                    nb = neighbors(zxd, v)
+                    if length(nb) <= 2
+                        set_loc!(layout, v, q, frontier_col[q])
+                        push!(seq, v)
+                        push!(vs_generated, v)
+                        q_active = false
+                        for v1 in nb
+                            if !(v1 in vs_generated)
+                                vs_frontier[q] = v1
+                                frontier_col[q] += 1
+                                q_active = true
+                                break
+                            end
+                        end
+                        frontier_active[q] = q_active
+                    else
+                        frontier_active[q] = false
+                    end
+                end
+            end
+        end
+        for q = 1:nbits
+            v = vs_frontier[q]
+            nb = neighbors(zxd, v)
+            isupdated = false
+            for v1 in nb
+                if !(v1 in vs_generated)
+                    q1 = findfirst(isequal(v1), vs_frontier)
+                    if q1 !== nothing
+                        col = maximum(frontier_col[min(q, q1):max(q, q1)])
+                        set_loc!(layout, v, q, col)
+                        set_loc!(layout, v1, q1, col)
+                        push!(vs_generated, v, v1)
+                        push!(seq, (v, v1))
+                        nb_v1 = neighbors(zxd, v1)
+                        new_v1 = nb_v1[findfirst(v -> !(v in vs_generated), nb_v1)]
+                        new_v = nb[findfirst(v -> !(v in vs_generated), nb)]
+                        vs_frontier[q] = new_v
+                        vs_frontier[q1] = new_v1
+                        for i in min(q, q1):max(q, q1)
+                            frontier_col[i] = col + 1
+                        end
+                        frontier_active[q] = true
+                        frontier_active[q1] = true
+                        isupdated = true
+                        break
+                    elseif spider_type(zxd, v1) == SpiderType.H && degree(zxd, v1) == 2
+                        nb_v1 = neighbors(zxd, v1)
+                        v2 = nb_v1[findfirst(!isequal(v), nb_v1)]
+                        q2 = findfirst(isequal(v2), vs_frontier)
+                        if q2 !== nothing
+                            col = maximum(frontier_col[min(q, q2):max(q, q2)])
+                            set_loc!(layout, v, q, col)
+                            set_loc!(layout, v2, q2, col)
+                            q1 = (q + q2)//2
+                            denominator(q1) == 1 && (q1 += 1//2)
+                            set_loc!(layout, v1, q1, col)
+                            push!(vs_generated, v, v1, v2)
+                            push!(seq, (v, v1, v2))
+                            nb_v2 = neighbors(zxd, v2)
+                            new_v = nb[findfirst(v -> !(v in vs_generated), nb)]
+                            new_v2 = nb_v2[findfirst(v -> !(v in vs_generated), nb_v2)]
+                            vs_frontier[q] = new_v
+                            vs_frontier[q2] = new_v2
+                            for i in min(q, q2):max(q, q2)
+                                frontier_col[i] = col + 1
+                            end
+                            frontier_active[q] = true
+                            frontier_active[q2] = true
+                            isupdated = true
+                            break
+                        end
+                    end
+                end
+                isupdated && break
+            end
+        end
+    end
+    for q = 1:length(vs_frontier)
+        set_loc!(layout, vs_frontier[q], q, frontier_col[q])
+    end
+    return layout
 end
 
 """

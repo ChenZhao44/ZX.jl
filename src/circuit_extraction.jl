@@ -143,8 +143,6 @@ function update_frontier!(zxg::ZXGraph{T, P}, gads::Set{T}, frontier::Vector{T},
     end
     N = collect(SetN)
 
-    # TODO: qubit_loc is not necessary here
-    # sort!(N, by = v -> qubit_loc(zxg, v))
     M = biadjacency(zxg, frontier, N)
     M0, steps = gaussian_elimination(M)
     ws = T[]

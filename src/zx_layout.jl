@@ -5,12 +5,12 @@ A struct for the layout information of `ZXDiagram` and `ZXGraph`.
 """
 struct ZXLayout{T<:Integer}
     nbits::Int
-    spider_q::Dict{T, Int}
+    spider_q::Dict{T, Rational{Int}}
     spider_col::Dict{T, Rational{Int}}
 end
 
-ZXLayout(nbits::Integer, spider_q::Dict{T, Int}, spider_col::Dict{T, Rational{Int}}) where {T} = ZXLayout{T}(Int(nbits), spider_q, spider_col)
-ZXLayout{T}() where {T} = ZXLayout(0, Dict{T, Int}(), Dict{T, Rational{Int}}())
+ZXLayout(nbits::Integer, spider_q::Dict{T, Rational{Int}}, spider_col::Dict{T, Rational{Int}}) where {T} = ZXLayout{T}(Int(nbits), spider_q, spider_col)
+ZXLayout{T}() where {T} = ZXLayout(0, Dict{T, Rational{Int}}(), Dict{T, Rational{Int}}())
 
 Base.copy(layout::ZXLayout) = ZXLayout(layout.nbits, copy(layout.spider_q), copy(layout.spider_col))
 function LightGraphs.rem_vertex!(layout::ZXLayout{T}, v::T) where {T}

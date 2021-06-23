@@ -21,7 +21,7 @@ zxd3 = ZXDiagram(3)
 ZXCalculus.insert_spider!(zxd3, 1, 2, SpiderType.H)
 pushfirst_gate!(zxd3, Val{:SWAP}(), [1, 2])
 push_gate!(zxd3, Val{:SWAP}(), [2, 3])
-@test ZXCalculus.qubit_loc(zxd3, 1) == ZXCalculus.qubit_loc(zxd3, 2) == ZXCalculus.qubit_loc(zxd3, 7)
+@test ZXCalculus.qubit_loc(zxd3, 1) == ZXCalculus.qubit_loc(zxd3, 2)
 
 @testset "float to rational" begin
     @test ZXCalculus.continued_fraction(2.41, 10) === 241//100

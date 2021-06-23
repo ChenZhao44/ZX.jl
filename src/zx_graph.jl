@@ -16,6 +16,8 @@ struct ZXGraph{T<:Integer, P} <: AbstractZXDiagram{T, P}
     phase_ids::Dict{T,Tuple{T, Int}}
     scalar::Scalar{P}
     master::ZXDiagram{T, P}
+    inputs::Vector{T}
+    outputs::Vector{T}
 end
 
 function Base.copy(zxg::ZXGraph{T, P}) where {T, P}
@@ -23,7 +25,7 @@ function Base.copy(zxg::ZXGraph{T, P}) where {T, P}
         copy(zxg.mg), copy(zxg.ps),
         copy(zxg.st), copy(zxg.et), copy(zxg.layout),
         deepcopy(zxg.phase_ids), copy(zxg.scalar), 
-        copy(zxg.master)
+        copy(zxg.master), copy(zxg.inputs), copy(zxg.outputs)
     )
 end
 
@@ -88,7 +90,7 @@ function ZXGraph(zxd::ZXDiagram{T, P}) where {T, P}
     for e in edges(nzxd.mg)
         et[(src(e), dst(e))] = EdgeType.SIM
     end
-    zxg = ZXGraph{T, P}(nzxd.mg, nzxd.ps, nzxd.st, et, nzxd.layout, nzxd.phase_ids, nzxd.scalar, zxd)
+    zxg = ZXGraph{T, P}(nzxd.mg, nzxd.ps, nzxd.st, et, nzxd.layout, nzxd.phase_ids, nzxd.scalar, zxd, nzxd.inputs, nzxd.outputs)
 
     for e in eH
         v1, v2 = e
@@ -217,19 +219,8 @@ function add_spider!(zxg::ZXGraph{T, P}, st::SpiderType.SType, phase::P = zero(P
     return v
 end
 function insert_spider!(zxg::ZXGraph{T, P}, v1::T, v2::T, phase::P = zero(P)) where {T<:Integer, P}
-    l1 = qubit_loc(zxg, v1)
-    l2 = qubit_loc(zxg, v2)
-    t1 = column_loc(zxg, v1)
-    t2 = column_loc(zxg, v2)
     v = add_spider!(zxg, SpiderType.Z, phase, [v1, v2])
     rem_edge!(zxg, v1, v2)
-    if l1 == l2 && l1 !== nothing
-        t = min(floor(t1), floor(t2)) + 1
-        if t >= max(t1, t2)
-            t = (t1 + t2) / 2
-        end
-        set_loc!(zxg.layout, v, l1, t)
-    end
     return v
 end
 
@@ -294,6 +285,8 @@ end
 
 get_outputs(zxg::ZXGraph) = get_outputs(zxg.master)
 get_inputs(zxg::ZXGraph) = get_inputs(zxg.master)
+
+# TODO: remove it?
 function spider_sequence(zxg::ZXGraph{T, P}) where {T, P}
     nbits = nqubits(zxg)
     if nbits > 0
@@ -304,7 +297,8 @@ function spider_sequence(zxg::ZXGraph{T, P}) where {T, P}
         end
         for v in vs
             if qubit_loc(zxg, v) !== nothing
-                push!(spider_seq[qubit_loc(zxg, v)], v)
+                q_loc = Int(qubit_loc(zxg, v))
+                q_loc > 0 && push!(spider_seq[q_loc], v)
             end
         end
         for q = 1:nbits
@@ -312,6 +306,94 @@ function spider_sequence(zxg::ZXGraph{T, P}) where {T, P}
         end
         return spider_seq
     end
+end
+
+function generate_layout!(zxg::ZXGraph{T, P}) where {T, P}
+    layout = zxg.layout
+    nbits = length(zxg.inputs)
+    vs_frontier = copy(zxg.inputs)
+    vs_generated = Set(vs_frontier)
+    frontier_col = [1//1 for _ = 1:nbits]
+    frontier_active = [true for _ = 1:nbits]
+    for i = 1:nbits
+        set_qubit!(layout, vs_frontier[i], i)
+        set_column!(layout, vs_frontier[i], 1//1)
+    end
+    gad_col = 1//1
+    for v in spiders(zxg)
+        if degree(zxg, v) == 1 && spider_type(zxg, v) == SpiderType.Z
+            v1 = neighbors(zxg, v)[1]
+            set_loc!(layout, v, -1//1, gad_col)
+            set_loc!(layout, v1, 0//1, gad_col)
+            push!(vs_generated, v, v1)
+            gad_col += 1
+        end
+    end
+
+    while !(zxg.outputs ⊆ vs_frontier)
+        while any(frontier_active)
+            for q in 1:nbits
+                if frontier_active[q]
+                    v = vs_frontier[q]
+                    nb = neighbors(zxg, v)
+                    nb_not_gen = nb[findall(v -> !(v in vs_generated), nb)]
+                    if length(nb_not_gen) == 1
+                        set_loc!(layout, v, q, frontier_col[q])
+                        frontier_col[q] += 1
+                        push!(vs_generated, v)
+                        vs_frontier[q] = nb_not_gen[1]
+                    else
+                        frontier_active[q] = false
+                    end
+                end
+            end
+        end
+        for q = 1:nbits
+            isupdated = false
+            v = vs_frontier[q]
+            nb = neighbors(zxg, v)
+            for v1 in nb
+                if !(v1 in vs_generated)
+                    q1 = findfirst(isequal(v1), vs_frontier)
+                    if q1 !== nothing
+                        col = maximum(frontier_col[min(q, q1):max(q, q1)])
+                        set_loc!(layout, v, q, col)
+                        set_loc!(layout, v1, q1, col)
+                        nb_v1 = neighbors(zxg, v1)
+                        push!(vs_generated, v, v1)
+                        new_v1 = nb_v1[findall(v -> !(v in vs_generated), nb_v1)]
+                        new_v = nb[findall(v -> !(v in vs_generated), nb)]
+                        if length(new_v) == 1
+                            vs_frontier[q] = new_v[]
+                            frontier_active[q] = true
+                            isupdated = true
+                            for i in min(q, q1):max(q, q1)
+                                frontier_col[i] = col + 1
+                            end
+                        else
+                            delete!(vs_generated, v)
+                        end
+                        if length(new_v1) == 1
+                            vs_frontier[q1] = new_v1[]
+                            frontier_active[q1] = true
+                            isupdated = true
+                            for i in min(q, q1):max(q, q1)
+                                frontier_col[i] = col + 1
+                            end
+                        else
+                            delete!(vs_generated, v1)
+                        end
+                        break
+                    end
+                end
+            end
+            isupdated && break
+        end
+    end
+    for q = 1:length(vs_frontier)
+        set_loc!(layout, vs_frontier[q], q, frontier_col[q])
+    end
+    return layout
 end
 
 scalar(zxg::ZXGraph) = zxg.scalar

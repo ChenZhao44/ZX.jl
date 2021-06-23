@@ -121,135 +121,76 @@ end
 
 function convert_to_chain(circ::ZXDiagram{TT, P}) where {TT, P}
     spider_seq = spider_sequence(circ)
-    vs = spiders(circ)
-    locs = Dict()
-    nqubit = nqubits(circ)
     qc = []
-    frontier_v = ones(TT, nqubit)
-
-    while sum([frontier_v[i] <= length(spider_seq[i]) for i = 1:nqubit]) > 0
-        for q = 1:nqubit
-            if frontier_v[q] <= length(spider_seq[q])
-                v = spider_seq[q][frontier_v[q]]
-                nb = ZXCalculus.neighbors(circ, v)
-                if length(nb) <= 2
-                    θ = phase(circ, v) * π
-                    if spider_type(circ, v) == ZXCalculus.SpiderType.Z
-                        if phase(circ, v) == 1
-                            push!(qc, Gate(Z, Locations(q)))
-                        elseif phase(circ, v) == 1//2
-                            push!(qc, Gate(S, Locations(q)))
-                        elseif phase(circ, v) == 3//2
-                            push!(qc, Gate(AdjointOperation(S), Locations(q)))
-                        elseif phase(circ, v) == 1//4
-                            push!(qc, Gate(T, Locations(q)))
-                        elseif phase(circ, v) == 7//4
-                            push!(qc, Gate(AdjointOperation(T), Locations(q)))
-                        elseif phase(circ, v) != 0
-                            if θ isa Phase
-                                θ = θ.ex
-                            end
-                            push!(qc, Gate(shift(θ), Locations(q)))
-                        end
-                    elseif spider_type(circ, v) == ZXCalculus.SpiderType.X
-                        if phase(circ, v) == 1
-                            push!(qc, Gate(X, Locations(q)))
-                        else phase(circ, v) != 0
-                            if θ isa Phase
-                                θ = θ.ex
-                            end
-                            push!(qc, Gate(Rx(θ), Locations(q)))
-                        end
-                    elseif spider_type(circ, v) == ZXCalculus.SpiderType.H
-                        push!(qc, Gate(H, Locations(q)))
-                    end
-
-                    frontier_v[q] += 1
-                elseif length(nb) == 3
-                    v1 = nb[[qubit_loc(circ, u) != q for u in nb]][1]
-                    if spider_type(circ, v1) == SpiderType.H
-                        v1 = setdiff(ZXCalculus.neighbors(circ, v1), [v])[1]
-                    end
-                    if sum([findfirst(isequal(u), spider_seq[qubit_loc(circ, u)]) != frontier_v[qubit_loc(circ, u)] for u in [v, v1]]) == 0
-                        if phase(circ, v) != 0
-                            if spider_type(circ, v) == ZXCalculus.SpiderType.Z
-                                if phase(circ, v) == 1
-                                    push!(qc, Gate(Z, Locations(qubit_loc(circ, v))))
-                                elseif phase(circ, v) == 1//2
-                                    push!(qc, Gate(S, Locations(qubit_loc(circ, v))))
-                                elseif phase(circ, v) == 3//2
-                                    push!(qc, Gate(S', Locations(qubit_loc(circ, v))))
-                                elseif phase(circ, v) == 1//4
-                                    push!(qc, Gate(T, Locations(qubit_loc(circ, v))))
-                                elseif phase(circ, v) == 7//4
-                                    push!(qc, Gate(T', Locations(qubit_loc(circ, v))))
-                                else
-                                    θ = phase(circ, v)*π
-                                    if θ isa Phase
-                                        θ = θ.ex
-                                    end
-                                    push!(qc, Gate(shift(θ), Locations(qubit_loc(circ, v))))
-                                end
-                            else
-                                if phase(circ, v) == 1
-                                    push!(qc, Gate(X, Locations(qubit_loc(circ, v))))
-                                else
-                                    θ = phase(circ, v)*π
-                                    if θ isa Phase
-                                        θ = θ.ex
-                                    end
-                                    push!(qc, Gate(Rx(θ), Locations(qubit_loc(circ, v))))
-                                end
-                            end
-                        end
-                        if phase(circ, v1) != 0
-                            if spider_type(circ, v1) == ZXCalculus.SpiderType.Z
-                                if phase(circ, v1) == 1
-                                    push!(qc, Gate(Z, Locations(qubit_loc(circ, v1))))
-                                elseif phase(circ, v1) == 1//2
-                                    push!(qc, Gate(S, Locations(qubit_loc(circ, v1))))
-                                elseif phase(circ, v1) == 3//2
-                                    push!(qc, Gate(S', Locations(qubit_loc(circ, v1))))
-                                elseif phase(circ, v1) == 1//4
-                                    push!(qc, Gate(T, Locations(qubit_loc(circ, v1))))
-                                elseif phase(circ, v1) == 7//4
-                                    push!(qc, Gate(T', Locations(qubit_loc(circ, v1))))
-                                else
-                                    θ = phase(circ, v1)*π
-                                    if θ isa Phase
-                                        θ = θ.ex
-                                    end
-                                    push!(qc, Gate(shift(θ), Locations(qubit_loc(circ, v1))))
-                                end
-                            else
-                                if phase(circ, v1) == 1
-                                    push!(qc, Gate(X, Locations(qubit_loc(circ, v1))))
-                                else
-                                    θ = phase(circ, v1)*π
-                                    if θ isa Phase
-                                        θ = θ.ex
-                                    end
-                                    push!(qc, Gate(Rx(θ), Locations(qubit_loc(circ, v1))))
-                                end
-                            end
-                        end
-
-                        if spider_type(circ, v) == spider_type(circ, v1) == ZXCalculus.SpiderType.Z
-                            push!(qc, Ctrl(Gate(Z, Locations(qubit_loc(circ, v))), CtrlLocations(qubit_loc(circ, v1))))
-                        elseif spider_type(circ, v) == ZXCalculus.SpiderType.Z
-                            push!(qc, Ctrl(Gate(X, Locations(qubit_loc(circ, v1))), CtrlLocations(qubit_loc(circ, v))))
-                        elseif spider_type(circ, v) == ZXCalculus.SpiderType.X
-                            push!(qc, Ctrl(Gate(X, Locations(qubit_loc(circ, v))), CtrlLocations(qubit_loc(circ, v1))))
-                        end
-                        for u in [v, v1]
-                            frontier_v[qubit_loc(circ, u)] += 1
-                        end
-                    end
-                else
-                    error("ZX-diagram without a circuit structure is not supported!")
-                end
+    for vs in spider_seq
+        if length(vs) == 1
+            v = vs
+            q = Int(qubit_loc(circ, vs))
+            push_spider_to_chain!(qc, q, phase(circ, v), spider_type(circ, v))
+        elseif length(vs) == 2
+            v1, v2 = vs
+            q1 = Int(qubit_loc(circ, v1))
+            q2 = Int(qubit_loc(circ, v2))
+            push_spider_to_chain!(qc, q1, phase(circ, v1), spider_type(circ, v1))
+            push_spider_to_chain!(qc, q2, phase(circ, v2), spider_type(circ, v2))
+            if spider_type(circ, v1) == SpiderType.Z && spider_type(circ, v2) == SpiderType.X
+                push!(qc, Ctrl(Gate(X, Locations(q2)), CtrlLocations(q1)))
+            elseif spider_type(circ, v1) == SpiderType.X && spider_type(circ, v1) == SpiderType.Z
+                push!(qc, Ctrl(Gate(X, Locations(q1)), CtrlLocations(q2)))
+            else
+                error("Spiders ($v1, $v2) should represent a CNOT")
             end
+        elseif length(vs) == 3
+            v1, h, v2 = vs
+            spider_type(circ, h) == SpiderType.H || error("The spider $h should be a H-box")
+            q1 = Int(qubit_loc(circ, v1))
+            q2 = Int(qubit_loc(circ, v2))
+            push_spider_to_chain!(qc, q1, phase(circ, v1), spider_type(circ, v1))
+            push_spider_to_chain!(qc, q2, phase(circ, v2), spider_type(circ, v2))
+            if spider_type(circ, v1) == SpiderType.Z && spider_type(circ, v2) == SpiderType.Z
+                push!(qc, Ctrl(Gate(Z, Locations(q2)), CtrlLocations(q1)))
+            else
+                error("Spiders ($v1, $h, $v2) should represent a CZ")
+            end
+        else
+            error("ZXDiagram's without circuit structure are not supported")
         end
     end
     return Chain(qc...)
+end
+
+function push_spider_to_chain!(qc, q, ps, st)
+    if ps != 0
+        if st == SpiderType.Z
+            if ps == 1
+                push!(qc, Gate(Z, Locations(q)))
+            elseif ps == 1//2
+                push!(qc, Gate(S, Locations(q)))
+            elseif ps == 3//2
+                push!(qc, Gate(AdjointOperation(S), Locations(q)))
+            elseif ps == 1//4
+                push!(qc, Gate(T, Locations(q)))
+            elseif ps == 7//4
+                push!(qc, Gate(AdjointOperation(T), Locations(q)))
+            elseif ps != 0
+                θ = ps * π
+                if θ isa Phase
+                    θ = θ.ex
+                end
+                push!(qc, Gate(shift(θ), Locations(q)))
+            end
+        elseif st == SpiderType.X
+            if ps == 1
+                push!(qc, Gate(X, Locations(q)))
+            else ps != 0
+                θ = ps * π
+                if θ isa Phase
+                    θ = θ.ex
+                end
+                push!(qc, Gate(Rx(θ), Locations(q)))
+            end
+        elseif st == SpiderType.H
+            push!(qc, Gate(H, Locations(q)))
+        end
+    end
 end
